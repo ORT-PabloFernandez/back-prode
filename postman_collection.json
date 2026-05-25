@@ -1,0 +1,297 @@
+{
+    "info": {
+        "name": "Prode Mundial 2026 API",
+        "_postman_id": "prode-mundial-2026",
+        "description": "Colección de endpoints para el Prode del Mundial 2026. Usar el endpoint de login para obtener el token JWT y luego configurarlo en la variable `token` de la colección.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:3000",
+            "type": "string"
+        },
+        {
+            "key": "token",
+            "value": "",
+            "type": "string",
+            "description": "JWT token obtenido del endpoint /api/auth/login"
+        }
+    ],
+    "item": [
+        {
+            "name": "Auth",
+            "description": "Endpoints de autenticación de usuarios",
+            "item": [
+                {
+                    "name": "Registrar usuario",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"name\": \"Juan Pérez\",\n    \"email\": \"juan@example.com\",\n    \"password\": \"password123\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/register",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "auth", "register"]
+                        },
+                        "description": "Crea un nuevo usuario. Devuelve el ID del usuario creado."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 201', () => pm.response.to.have.status(201));"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Login",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"email\": \"juan@example.com\",\n    \"password\": \"password123\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/login",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "auth", "login"]
+                        },
+                        "description": "Devuelve un JWT token. El script de test lo guarda automáticamente en la variable `token`."
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                                    "const json = pm.response.json();",
+                                    "if (json.token) { pm.collectionVariables.set('token', json.token); console.log('Token guardado:', json.token); }"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Perfil del usuario autenticado",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            { "key": "Authorization", "value": "Bearer {{token}}" }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/me",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "auth", "me"]
+                        },
+                        "description": "Devuelve los datos del usuario autenticado (token requerido)."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Partidos",
+            "description": "Endpoints públicos para consultar partidos de la fase de grupos del Mundial 2026",
+            "item": [
+                {
+                    "name": "Obtener todos los partidos (fase de grupos)",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{base_url}}/api/matches",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "matches"]
+                        },
+                        "description": "Devuelve todos los partidos de la fase de grupos del Mundial 2026. Los datos provienen de OpenFootball (GitHub) y se cachean 1 hora en MongoDB."
+                    }
+                },
+                {
+                    "name": "Filtrar por fecha / jornada",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{base_url}}/api/matches?round=Matchday 1",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "matches"],
+                            "query": [
+                                {
+                                    "key": "round",
+                                    "value": "Matchday 1",
+                                    "description": "Filtra por jornada. Valores posibles: 'Matchday 1', 'Matchday 2', 'Matchday 3'"
+                                }
+                            ]
+                        },
+                        "description": "Filtra los partidos por jornada. Valores posibles: 'Matchday 1', 'Matchday 2', 'Matchday 3'."
+                    }
+                },
+                {
+                    "name": "Filtrar por estado",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{base_url}}/api/matches?status=NS",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "matches"],
+                            "query": [
+                                {
+                                    "key": "status",
+                                    "value": "NS",
+                                    "description": "NS=No iniciado, 1H=Primer tiempo, HT=Descanso, 2H=Segundo tiempo, FT=Finalizado"
+                                }
+                            ]
+                        },
+                        "description": "Filtra por estado del partido. Códigos: NS (no iniciado), 1H (en curso - estimado por hora de inicio), FT (finalizado)."
+                    }
+                },
+                {
+                    "name": "Obtener partido por ID",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{base_url}}/api/matches/2062033516",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "matches", "2062033516"]
+                        },
+                        "description": "Devuelve el detalle completo de un partido por su fixtureId. El ID se obtiene del campo `fixture.id` en GET /api/matches. Ejemplo: 2062033516 = México vs Sudáfrica."
+                    }
+                },
+                {
+                    "name": "Obtener jornadas disponibles",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{base_url}}/api/matches/rounds",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "matches", "rounds"]
+                        },
+                        "description": "Devuelve la lista de jornadas/fechas de la fase de grupos."
+                    }
+                },
+                {
+                    "name": "Tabla de posiciones (grupos)",
+                    "request": {
+                        "method": "GET",
+                        "url": {
+                            "raw": "{{base_url}}/api/matches/standings",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "matches", "standings"]
+                        },
+                        "description": "Devuelve las tablas de posiciones de todos los grupos de la fase de grupos."
+                    }
+                },
+                {
+                    "name": "Forzar actualización de caché",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Authorization", "value": "Bearer {{token}}" }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/matches/refresh-cache",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "matches", "refresh-cache"]
+                        },
+                        "description": "Fuerza la recarga de los partidos desde OpenFootball (GitHub raw JSON) invalidando el caché. Requiere autenticación."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Pronósticos",
+            "description": "Endpoints para gestionar los pronósticos del usuario autenticado. Todos requieren token JWT.",
+            "item": [
+                {
+                    "name": "Crear o actualizar pronóstico",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" },
+                            { "key": "Authorization", "value": "Bearer {{token}}" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"fixtureId\": 2062033516,\n    \"homeGoals\": 2,\n    \"awayGoals\": 1\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/predictions",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "predictions"]
+                        },
+                        "description": "Crea o actualiza el pronóstico del usuario para un partido. Solo se puede apostar en partidos que no hayan comenzado (status NS). Si ya existe un pronóstico para ese partido, lo sobreescribe."
+                    }
+                },
+                {
+                    "name": "Ver mis pronósticos",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            { "key": "Authorization", "value": "Bearer {{token}}" }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/predictions",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "predictions"]
+                        },
+                        "description": "Devuelve todos los pronósticos del usuario autenticado, enriquecidos con los datos del partido y los puntos obtenidos (si el partido ya finalizó)."
+                    }
+                },
+                {
+                    "name": "Ver pronóstico de un partido",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            { "key": "Authorization", "value": "Bearer {{token}}" }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/predictions/2062033516",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "predictions", "2062033516"]
+                        },
+                        "description": "Devuelve el pronóstico del usuario para un partido específico. Usar el fixtureId obtenido de GET /api/matches."
+                    }
+                },
+                {
+                    "name": "Eliminar pronóstico",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            { "key": "Authorization", "value": "Bearer {{token}}" }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/predictions/2062033516",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "predictions", "2062033516"]
+                        },
+                        "description": "Elimina el pronóstico del usuario para un partido. Solo se puede eliminar si el partido aún no comenzó."
+                    }
+                },
+                {
+                    "name": "Ranking global",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            { "key": "Authorization", "value": "Bearer {{token}}" }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/predictions/ranking",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "predictions", "ranking"]
+                        },
+                        "description": "Devuelve el ranking de todos los usuarios ordenado por puntos totales. Los puntos se calculan sobre los partidos finalizados. Resultado exacto = 3 pts, resultado correcto = 1 pt."
+                    }
+                }
+            ]
+        }
+    ]
+}
