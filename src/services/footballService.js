@@ -1,5 +1,61 @@
 import { getDb } from "../data/connection.js";
 
+const FLAG_CODES = {
+    "Argentina": "ar",
+    "Algeria": "dz",
+    "Australia": "au",
+    "Austria": "at",
+    "Belgium": "be",
+    "Bosnia & Herzegovina": "ba",
+    "Brazil": "br",
+    "Canada": "ca",
+    "Cape Verde": "cv",
+    "Colombia": "co",
+    "Croatia": "hr",
+    "Curaçao": "cw",
+    "Czech Republic": "cz",
+    "DR Congo": "cd",
+    "Ecuador": "ec",
+    "Egypt": "eg",
+    "England": "gb-eng",
+    "France": "fr",
+    "Germany": "de",
+    "Ghana": "gh",
+    "Haiti": "ht",
+    "Iran": "ir",
+    "Iraq": "iq",
+    "Ivory Coast": "ci",
+    "Japan": "jp",
+    "Jordan": "jo",
+    "Mexico": "mx",
+    "Morocco": "ma",
+    "Netherlands": "nl",
+    "New Zealand": "nz",
+    "Norway": "no",
+    "Panama": "pa",
+    "Paraguay": "py",
+    "Portugal": "pt",
+    "Qatar": "qa",
+    "Saudi Arabia": "sa",
+    "Scotland": "gb-sct",
+    "Senegal": "sn",
+    "South Africa": "za",
+    "South Korea": "kr",
+    "Spain": "es",
+    "Sweden": "se",
+    "Switzerland": "ch",
+    "Tunisia": "tn",
+    "Turkey": "tr",
+    "Uruguay": "uy",
+    "USA": "us",
+    "Uzbekistan": "uz",
+};
+
+function getFlagUrl(teamName) {
+    const code = FLAG_CODES[teamName];
+    return code ? `https://flagcdn.com/w80/${code}.png` : null;
+}
+
 const OPENFOOTBALL_URL =
     "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json";
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora
@@ -63,8 +119,8 @@ function normalizeMatch(match) {
             group: match.group ?? null,
         },
         teams: {
-            home: { name: match.team1 },
-            away: { name: match.team2 },
+            home: { name: match.team1, flag: getFlagUrl(match.team1) },
+            away: { name: match.team2, flag: getFlagUrl(match.team2) },
         },
         goals: {
             home: ft ? ft[0] : null,
