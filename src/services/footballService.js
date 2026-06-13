@@ -1,154 +1,103 @@
 import { getDb } from "../data/connection.js";
 
-const FLAG_CODES = {
-    "Argentina": "ar",
-    "Algeria": "dz",
-    "Australia": "au",
-    "Austria": "at",
-    "Belgium": "be",
-    "Bosnia & Herzegovina": "ba",
-    "Brazil": "br",
-    "Canada": "ca",
-    "Cape Verde": "cv",
-    "Colombia": "co",
-    "Croatia": "hr",
-    "Curaçao": "cw",
-    "Czech Republic": "cz",
-    "DR Congo": "cd",
-    "Ecuador": "ec",
-    "Egypt": "eg",
-    "England": "gb-eng",
-    "France": "fr",
-    "Germany": "de",
-    "Ghana": "gh",
-    "Haiti": "ht",
-    "Iran": "ir",
-    "Iraq": "iq",
-    "Ivory Coast": "ci",
-    "Japan": "jp",
-    "Jordan": "jo",
-    "Mexico": "mx",
-    "Morocco": "ma",
-    "Netherlands": "nl",
-    "New Zealand": "nz",
-    "Norway": "no",
-    "Panama": "pa",
-    "Paraguay": "py",
-    "Portugal": "pt",
-    "Qatar": "qa",
-    "Saudi Arabia": "sa",
-    "Scotland": "gb-sct",
-    "Senegal": "sn",
-    "South Africa": "za",
-    "South Korea": "kr",
-    "Spain": "es",
-    "Sweden": "se",
-    "Switzerland": "ch",
-    "Tunisia": "tn",
-    "Turkey": "tr",
-    "Uruguay": "uy",
-    "USA": "us",
-    "Uzbekistan": "uz",
-};
+const FD_BASE = "https://api.football-data.org/v4";
+const FD_API_KEY = process.env.FOOTBALL_DATA_API_KEY;
+const COMPETITION_CODE = "WC";
 
-function getFlagUrl(teamName) {
-    const code = FLAG_CODES[teamName];
-    return code ? `https://flagcdn.com/w80/${code}.png` : null;
-}
+// Partidos sin iniciar o finalizados: caché de 1 hora
+const CACHE_TTL_DEFAULT = 60 * 60 * 1000;
+// Cuando hay partido en curso: caché de 60 segundos (consulta en vivo)
+const CACHE_TTL_LIVE = 60 * 1000;
 
-const OPENFOOTBALL_URL =
-    "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json";
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora
+const LIVE_STATUSES = new Set(["IN_PLAY", "PAUSED", "EXTRA_TIME", "PENALTY_SHOOTOUT"]);
 
-// Genera un ID numérico estable a partir de fecha + equipos
-function stableId(match) {
-    const str = `${match.date}_${match.team1}_${match.team2}`;
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = ((hash << 5) - hash) + str.charCodeAt(i);
-        hash |= 0;
-    }
-    return Math.abs(hash);
-}
-
-// Convierte el formato de hora "13:00 UTC-6" a un Date UTC
-function parseKickoffUTC(date, time) {
-    try {
-        const [hm, utcPart] = time.split(" ");
-        const [hours, minutes] = hm.split(":").map(Number);
-        let offsetHours = 0;
-        if (utcPart) {
-            const m = utcPart.match(/UTC([+-]\d+)/);
-            if (m) offsetHours = parseInt(m[1]);
-        }
-        const d = new Date(
-            `${date}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00Z`
-        );
-        d.setHours(d.getHours() - offsetHours);
-        return d;
-    } catch {
-        return new Date(`${date}T00:00:00Z`);
+function mapStatus(m) {
+    switch (m.status) {
+        case "FINISHED":
+        case "AWARDED":
+            return { short: "FT", long: "Match Finished", elapsed: 90 };
+        case "IN_PLAY":
+            return { short: "1H", long: "In Progress", elapsed: m.minute ?? null };
+        case "PAUSED":
+            return { short: "HT", long: "Half Time", elapsed: 45 };
+        case "EXTRA_TIME":
+            return { short: "ET", long: "Extra Time", elapsed: m.minute ?? null };
+        case "PENALTY_SHOOTOUT":
+            return { short: "P", long: "Penalty Shootout", elapsed: null };
+        case "POSTPONED":
+            return { short: "PST", long: "Postponed", elapsed: null };
+        case "CANCELLED":
+            return { short: "CANC", long: "Cancelled", elapsed: null };
+        default:
+            return { short: "NS", long: "Not Started", elapsed: null };
     }
 }
 
-function determineStatus(match) {
-    if (match.score?.ft) {
-        return { short: "FT", long: "Match Finished", elapsed: 90 };
-    }
-    const kickoff = parseKickoffUTC(match.date, match.time || "00:00");
-    if (new Date() > kickoff) {
-        return { short: "1H", long: "In Progress", elapsed: null };
-    }
-    return { short: "NS", long: "Not Started", elapsed: null };
-}
-
-function normalizeMatch(match) {
-    const status = determineStatus(match);
-    const ft = match.score?.ft ?? null;
-    const kickoff = parseKickoffUTC(match.date, match.time || "00:00");
+function normalizeMatch(m) {
+    const ft = m.score?.fullTime;
+    const ht = m.score?.halfTime;
+    const group = m.group ? m.group.replace("GROUP_", "Group ") : null;
+    const round = m.matchday != null ? `Matchday ${m.matchday}` : (m.stage ?? "Unknown");
+    const ftValid = ft && ft.home !== null && ft.away !== null;
 
     return {
         fixture: {
-            id: stableId(match),
-            date: kickoff.toISOString(),
-            venue: match.ground ?? null,
-            status,
+            id: m.id,
+            date: m.utcDate,
+            venue: m.venue ?? null,
+            status: mapStatus(m),
         },
         league: {
-            round: match.round,
-            group: match.group ?? null,
+            round,
+            group,
         },
         teams: {
-            home: { name: match.team1, flag: getFlagUrl(match.team1) },
-            away: { name: match.team2, flag: getFlagUrl(match.team2) },
+            home: {
+                name: m.homeTeam.shortName ?? m.homeTeam.name,
+                flag: m.homeTeam.crest ?? null,
+            },
+            away: {
+                name: m.awayTeam.shortName ?? m.awayTeam.name,
+                flag: m.awayTeam.crest ?? null,
+            },
         },
         goals: {
-            home: ft ? ft[0] : null,
-            away: ft ? ft[1] : null,
+            home: ftValid ? ft.home : null,
+            away: ftValid ? ft.away : null,
         },
-        score: ft
+        score: ftValid
             ? {
-                  halftime: match.score.ht
-                      ? { home: match.score.ht[0], away: match.score.ht[1] }
-                      : null,
-                  fulltime: { home: ft[0], away: ft[1] },
+                  halftime: ht ? { home: ht.home, away: ht.away } : null,
+                  fulltime: { home: ft.home, away: ft.away },
               }
             : null,
     };
 }
 
+async function fdFetch(path) {
+    const res = await fetch(`${FD_BASE}${path}`, {
+        headers: { "X-Auth-Token": FD_API_KEY },
+    });
+    if (!res.ok) {
+        throw new Error(`football-data.org error ${res.status}: ${await res.text()}`);
+    }
+    return res.json();
+}
+
 async function getCached(key) {
     const db = getDb();
     const doc = await db.collection("fixtures_cache").findOne({ key });
-    if (doc && Date.now() - doc.updatedAt < CACHE_TTL_MS) return doc.data;
+    if (!doc) return null;
+    const ttl = doc.hasLive ? CACHE_TTL_LIVE : CACHE_TTL_DEFAULT;
+    if (Date.now() - doc.updatedAt < ttl) return doc.data;
     return null;
 }
 
-async function setCache(key, data) {
+async function setCache(key, data, hasLive = false) {
     const db = getDb();
     await db.collection("fixtures_cache").updateOne(
         { key },
-        { $set: { key, data, updatedAt: Date.now() } },
+        { $set: { key, data, hasLive, updatedAt: Date.now() } },
         { upsert: true }
     );
 }
@@ -161,26 +110,33 @@ export async function getGroupStageFixtures({ forceRefresh = false } = {}) {
         if (cached) return cached;
     }
 
-    const response = await fetch(OPENFOOTBALL_URL);
-    if (!response.ok) throw new Error(`Error al obtener datos: ${response.status}`);
+    const data = await fdFetch(`/competitions/${COMPETITION_CODE}/matches?stage=GROUP_STAGE`);
+    const rawMatches = data.matches ?? [];
 
-    const data = await response.json();
-    const groupMatches = (data.matches ?? [])
-        .filter((m) => m.group)
-        .map(normalizeMatch);
+    const fixtures = rawMatches.map(normalizeMatch);
+    const hasLive = rawMatches.some((m) => LIVE_STATUSES.has(m.status));
 
-    await setCache(cacheKey, groupMatches);
-    return groupMatches;
+    await setCache(cacheKey, fixtures, hasLive);
+    return fixtures;
 }
 
 export async function getFixtureById(fixtureId) {
     const fixtures = await getGroupStageFixtures();
-    return fixtures.find((f) => f.fixture.id === Number(fixtureId)) ?? null;
+    const found = fixtures.find((f) => f.fixture.id === Number(fixtureId));
+    if (found) return found;
+
+    // Fallback: consulta directa (ej. fase eliminatoria)
+    const data = await fdFetch(`/matches/${fixtureId}`);
+    return normalizeMatch(data);
 }
 
 export async function getGroupStageRounds() {
     const fixtures = await getGroupStageFixtures();
-    return [...new Set(fixtures.map((f) => f.league.round))].sort();
+    return [...new Set(fixtures.map((f) => f.league.round))].sort((a, b) => {
+        const numA = parseInt(a.replace(/\D/g, "")) || 0;
+        const numB = parseInt(b.replace(/\D/g, "")) || 0;
+        return numA - numB;
+    });
 }
 
 export async function getGroupStageStandings() {
@@ -189,6 +145,7 @@ export async function getGroupStageStandings() {
 
     for (const fixture of fixtures) {
         const group = fixture.league.group;
+        if (!group) continue;
         if (!groups[group]) groups[group] = {};
 
         const home = fixture.teams.home.name;
