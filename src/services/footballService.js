@@ -4,12 +4,25 @@ const FD_BASE = "https://api.football-data.org/v4";
 const FD_API_KEY = process.env.FOOTBALL_DATA_API_KEY;
 const COMPETITION_CODE = "WC";
 
-// Partidos sin iniciar o finalizados: caché de 1 hora
-const CACHE_TTL_DEFAULT = 60 * 60 * 1000;
-// Cuando hay partido en curso: caché de 60 segundos (consulta en vivo)
-const CACHE_TTL_LIVE = 60 * 1000;
+const CACHE_TTL_MS      = 15 * 60 * 1000;  // 15 min (sin partidos en curso)
+const CACHE_TTL_LIVE_MS =      60 * 1000;  // 60s  (partido empezado o en juego)
 
-const LIVE_STATUSES = new Set(["IN_PLAY", "PAUSED", "EXTRA_TIME", "PENALTY_SHOOTOUT"]);
+const LIVE_STATUSES = ["1H", "HT", "2H", "ET", "P"];
+
+function shouldUseLiveTtl(data) {
+    if (!data?.length) return false;
+    const now = Date.now();
+    return data.some((m) => {
+        const status = m.fixture?.status?.short;
+        if (LIVE_STATUSES.includes(status)) return true;
+        // NS pero el kickoff ya pasó → puede haber arrancado
+        if (status === "NS") {
+            const kickoff = new Date(m.fixture?.date).getTime();
+            return now > kickoff;
+        }
+        return false;
+    });
+}
 
 function mapStatus(m) {
     switch (m.status) {
@@ -88,16 +101,16 @@ async function getCached(key) {
     const db = getDb();
     const doc = await db.collection("fixtures_cache").findOne({ key });
     if (!doc) return null;
-    const ttl = doc.hasLive ? CACHE_TTL_LIVE : CACHE_TTL_DEFAULT;
+    const ttl = shouldUseLiveTtl(doc.data) ? CACHE_TTL_LIVE_MS : CACHE_TTL_MS;
     if (Date.now() - doc.updatedAt < ttl) return doc.data;
     return null;
 }
 
-async function setCache(key, data, hasLive = false) {
+async function setCache(key, data) {
     const db = getDb();
     await db.collection("fixtures_cache").updateOne(
         { key },
-        { $set: { key, data, hasLive, updatedAt: Date.now() } },
+        { $set: { key, data, updatedAt: Date.now() } },
         { upsert: true }
     );
 }
@@ -114,9 +127,8 @@ export async function getGroupStageFixtures({ forceRefresh = false } = {}) {
     const rawMatches = data.matches ?? [];
 
     const fixtures = rawMatches.map(normalizeMatch);
-    const hasLive = rawMatches.some((m) => LIVE_STATUSES.has(m.status));
 
-    await setCache(cacheKey, fixtures, hasLive);
+    await setCache(cacheKey, fixtures);
     return fixtures;
 }
 
